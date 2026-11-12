@@ -77,6 +77,50 @@ class EmptyAssistantHistory(unittest.TestCase):
         self.assertIn("<tool_response>\n\n</tool_response>", prompt)
 
 
+class PreserveThinkingKwargs(unittest.TestCase):
+    """The request's chat_template_kwargs.preserve_thinking reaches the template: the history's
+    thinking blocks are rendered when it is true (or absent) and left out when it is false."""
+
+    def setUp(self):
+        self.template = ChatTemplate(Path(__file__).with_name("chat_template.jinja"))
+        tok = ByteTokenizer()
+        self.service = Service(MockEngine(tok, "ok"), tok, self.template)
+
+    @staticmethod
+    def history():
+        return [{"role": "user", "content": "one"},
+                {"role": "assistant", "content": "answer1", "reasoning_content": "thinking1"},
+                {"role": "user", "content": "two"},
+                {"role": "assistant", "content": "answer2", "reasoning_content": "thinking2"},
+                {"role": "user", "content": "three"}]
+
+    def test_false_reaches_the_template_and_drops_the_history_thinking(self):
+        messages, tools, kwargs = openai_to_messages({"messages": self.history(),
+                                                      "chat_template_kwargs": {"preserve_thinking": False}})
+        self.assertFalse(kwargs["preserve_thinking"])
+        prompt = self.template.render(messages, tools=tools, add_generation_prompt=False, **kwargs)
+        self.assertNotIn("thinking1", prompt)
+        self.assertIn("answer1", prompt)
+        self.assertNotIn("thinking2", prompt)
+
+    def test_true_is_the_default_and_keeps_the_history_thinking(self):
+        for ctk in ({"preserve_thinking": True}, None):
+            with self.subTest(chat_template_kwargs=ctk):
+                messages, tools, kwargs = openai_to_messages(
+                    {"messages": self.history(), **({"chat_template_kwargs": ctk} if ctk else {})})
+                self.assertIs(kwargs.get("preserve_thinking"), ctk and True)    # absent or true: the template keeps the history
+                prompt = self.template.render(messages, tools=tools, add_generation_prompt=False, **kwargs)
+                self.assertIn("thinking1", prompt)
+                self.assertIn("thinking2", prompt)
+
+    def test_only_a_boolean_is_accepted(self):
+        for value in ("false", 0, 1, None):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    openai_to_messages({"messages": self.history(),
+                                        "chat_template_kwargs": {"preserve_thinking": value}})
+
+
 class UnreadContentParts(unittest.TestCase):
     """A content part the server does not read is refused naming it and where it sits, as /v1/responses does; chat
     and messages used to drop it without a word, and the model answered about a file it had never seen."""

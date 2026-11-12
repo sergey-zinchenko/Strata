@@ -757,6 +757,33 @@ class TokenizeEndpoint(unittest.TestCase):
                                        "stream_options": {"include_usage": True}})
         self.assertEqual(s, 200, b)
 
+    def test_preserve_thinking_changes_the_count(self):
+        # the history's thinking blocks are part of the prompt, so dropping them changes the count
+        history = [{"role": "user", "content": "one"},
+                   {"role": "assistant", "content": "answer1", "reasoning_content": "thinking1"},
+                   {"role": "user", "content": "two"},
+                   {"role": "assistant", "content": "answer2", "reasoning_content": "thinking2"},
+                   {"role": "user", "content": "three"}]
+        s, kept = self.post("/tokenize", {"model": "m", "messages": history})
+        self.assertEqual(s, 200, kept)
+        s, dropped = self.post("/tokenize", {"model": "m", "messages": history,
+                                             "chat_template_kwargs": {"preserve_thinking": False}})
+        self.assertEqual(s, 200, dropped)
+        self.assertGreater(kept["count"], dropped["count"])
+        self.assertEqual(kept["count"], len(kept["tokens"]))
+        self.assertEqual(dropped["count"], len(dropped["tokens"]))
+        # and the same difference a real request would take
+        s2, live = self.post("/v1/chat/completions", {"model": "m", "max_tokens": 2, "messages": history,
+                                                      "chat_template_kwargs": {"preserve_thinking": False}})
+        self.assertEqual(s2, 200, live)
+        self.assertEqual(dropped["count"], live["usage"]["prompt_tokens"])
+
+    def test_preserve_thinking_only_accepts_a_boolean(self):
+        for value in ("false", 0, 1, None):
+            s, b = self.post("/tokenize", {"model": "m", "messages": [{"role": "user", "content": "hi"}],
+                                           "chat_template_kwargs": {"preserve_thinking": value}})
+            self.assertEqual(s, 400, b)
+
     def test_the_clients_model_name_is_accepted(self):
         # as the other routes, this server has one model and every name reaches it (the client's deployment id)
         s, b = self.post("/tokenize", {"model": "some-dial-deployment-id", "prompt": "hi"})

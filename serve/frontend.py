@@ -615,6 +615,12 @@ def openai_to_messages(req: dict) -> tuple[list[dict], list[dict] | None, dict]:
             kwargs = {"enable_thinking": False}
         elif k == "reasoning_effort" and "enable_thinking" not in kwargs:
             kwargs.update(effort_kwargs(v))
+        elif k == "preserve_thinking":
+            # the template reads `preserve_thinking is true`, so a truthy string would silently
+            # drop the history's reasoning: only a real boolean reaches the template
+            if not isinstance(v, bool):
+                raise ValueError("chat_template_kwargs.preserve_thinking: true or false")
+            kwargs["preserve_thinking"] = v
     return _env_to_user(_late_system_to_user(messages)), tools, kwargs
 
 
