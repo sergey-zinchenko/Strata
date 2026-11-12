@@ -121,6 +121,63 @@ class PreserveThinkingKwargs(unittest.TestCase):
                                         "chat_template_kwargs": {"preserve_thinking": value}})
 
 
+class AnthropicPreserveThinking(unittest.TestCase):
+    """The Anthropic path takes the same vendor extension: a signed-thinking client must echo `thinking` blocks
+    back and has no other way to keep the history's reasoning out of the prompt, so
+    chat_template_kwargs.preserve_thinking = false does it for it.  Absent or true keeps the protocol's
+    convention: what the client sent is what the model sees."""
+
+    def setUp(self):
+        self.template = ChatTemplate(Path(__file__).with_name("chat_template.jinja"))
+
+    @staticmethod
+    def request(ctk=None):
+        req = {"messages": [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "thinking1", "signature": "sig1"},
+                {"type": "text", "text": "answer1"}]},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "thinking2", "signature": "sig2"},
+                {"type": "text", "text": "answer2"}]},
+            {"role": "user", "content": "three"}]}
+        if ctk is not None:
+            req["chat_template_kwargs"] = ctk
+        return req
+
+    def test_false_drops_the_history_thinking(self):
+        messages, tools, kwargs = anthropic_to_messages(self.request({"preserve_thinking": False}))
+        self.assertFalse(kwargs["preserve_thinking"])
+        prompt = self.template.render(messages, tools=tools, add_generation_prompt=False, **kwargs)
+        self.assertNotIn("thinking1", prompt)
+        self.assertIn("answer1", prompt)
+        self.assertNotIn("thinking2", prompt)
+
+    def test_true_or_absent_keeps_the_history_thinking(self):
+        for ctk in ({"preserve_thinking": True}, None):
+            with self.subTest(chat_template_kwargs=ctk):
+                messages, tools, kwargs = anthropic_to_messages(self.request(ctk))
+                self.assertIs(kwargs.get("preserve_thinking"), ctk and True)
+                prompt = self.template.render(messages, tools=tools, add_generation_prompt=False, **kwargs)
+                self.assertIn("thinking1", prompt)
+                self.assertIn("thinking2", prompt)
+
+    def test_only_a_boolean_is_accepted(self):
+        for value in ("false", 0, 1, None):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    anthropic_to_messages(self.request({"preserve_thinking": value}))
+
+    def test_other_template_kwargs_are_still_ignored(self):
+        # the OpenAI path reads enable_thinking/reasoning_effort from chat_template_kwargs; the Anthropic
+        # protocol has its own thinking/output_config fields, so those stay untouched
+        messages, tools, kwargs = anthropic_to_messages(
+            self.request({"enable_thinking": False, "preserve_thinking": False}))
+        self.assertNotIn("enable_thinking", kwargs)
+        self.assertFalse(kwargs["preserve_thinking"])
+
+
 class UnreadContentParts(unittest.TestCase):
     """A content part the server does not read is refused naming it and where it sits, as /v1/responses does; chat
     and messages used to drop it without a word, and the model answered about a file it had never seen."""

@@ -756,6 +756,15 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
         # A config's reasoning_effort still applies: Service.with_shared sets output_config before this runs.  A
         # request that gives its own reasoning_budget_tokens (#123) asks for thinking, so it thinks as before.
         kwargs["enable_thinking"] = False
+    # Not in Anthropic's protocol: the client decides by echoing `thinking` blocks back, but a signed-thinking
+    # client (extended thinking + tool use) must echo them, so it has no way to keep them out of the prompt.
+    # The same vendor extension as the OpenAI path: chat_template_kwargs.preserve_thinking = false drops the
+    # history's thinking (the template reads `preserve_thinking is true`, so only a real boolean reaches it).
+    for k, v in (req.get("chat_template_kwargs") or {}).items():
+        if k == "preserve_thinking":
+            if not isinstance(v, bool):
+                raise ValueError("chat_template_kwargs.preserve_thinking: true or false")
+            kwargs["preserve_thinking"] = v
     return _env_to_user(_late_system_to_user(messages)), tools, kwargs
 
 

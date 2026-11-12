@@ -784,6 +784,32 @@ class TokenizeEndpoint(unittest.TestCase):
                                            "chat_template_kwargs": {"preserve_thinking": value}})
             self.assertEqual(s, 400, b)
 
+    def test_anthropic_count_tokens_honors_preserve_thinking(self):
+        # the same extension on the Anthropic path: a signed-thinking client must echo the blocks back, so the
+        # flag is its only way to keep the history's reasoning out of the counted prompt
+        history = [{"role": "user", "content": "one"},
+                   {"role": "assistant", "content": [
+                       {"type": "thinking", "thinking": "thinking1", "signature": "sig1"},
+                       {"type": "text", "text": "answer1"}]},
+                   {"role": "user", "content": "two"},
+                   {"role": "assistant", "content": [
+                       {"type": "thinking", "thinking": "thinking2", "signature": "sig2"},
+                       {"type": "text", "text": "answer2"}]},
+                   {"role": "user", "content": "three"}]
+        s, kept = self.post("/v1/messages/count_tokens", {"model": "m", "messages": history})
+        self.assertEqual(s, 200, kept)
+        s, dropped = self.post("/v1/messages/count_tokens",
+                               {"model": "m", "messages": history,
+                                "chat_template_kwargs": {"preserve_thinking": False}})
+        self.assertEqual(s, 200, dropped)
+        self.assertGreater(kept["input_tokens"], dropped["input_tokens"])
+        for value in ("false", 0, 1, None):
+            with self.subTest(value=value):
+                s, b = self.post("/v1/messages/count_tokens",
+                                 {"model": "m", "messages": history,
+                                  "chat_template_kwargs": {"preserve_thinking": value}})
+                self.assertEqual(s, 400, b)
+
     def test_the_clients_model_name_is_accepted(self):
         # as the other routes, this server has one model and every name reaches it (the client's deployment id)
         s, b = self.post("/tokenize", {"model": "some-dial-deployment-id", "prompt": "hi"})
